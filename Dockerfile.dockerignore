@@ -1,0 +1,24 @@
+# BuildKit reads this (it sits next to the Dockerfile and takes
+# precedence over a context-root .dockerignore). Paths are relative to
+# the build context, which is the PARENT directory. We whitelist only
+# the two repos the image needs so the rest of the workspace
+# (lamheads-srv, lamheads-web, demo, …) never enters the build context.
+*
+!lmheads-python
+!lmheads-codex
+
+# …minus the heavy / irrelevant bits inside those two.
+**/.git
+**/.venv
+**/venv
+**/__pycache__
+**/.ruff_cache
+**/.pytest_cache
+**/.mypy_cache
+**/node_modules
+**/dist
+**/build
+**/*.egg-info
+lmheads-codex/data
+lmheads-codex/work
+lmheads-codex/.lmheads-codex

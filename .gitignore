@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# uv
+uv.lock
+
+# tooling caches
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+
+# Local secrets / config
+.env
+
+# Per-workspace bridge state (codex thread map, logs). Lives under the
+# directory you launch the bridge from; never commit it.
+.lmheads-codex/
+
+# Docker bind mounts (compose): persistent home (~/.codex auth, config,
+# history) and the project workspace Codex operates in.
+data/
+work/

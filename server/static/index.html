@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>lmheads-codex</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
+  <style>
+    :root { color-scheme: dark; }
+    html, body { margin: 0; padding: 0; height: 100%; background: #0b0d10; color: #e6e7ea;
+                  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    #login {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: #0b0d10;
+    }
+    #login .card {
+      background: #14171c; border: 1px solid #2a2f37; border-radius: 12px;
+      padding: 28px 32px; width: 320px; box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+    }
+    #login h1 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+    #login p  { margin: 0 0 20px; font-size: 13px; color: #8a8f99; }
+    #login input {
+      width: 100%; padding: 10px 12px; box-sizing: border-box;
+      background: #0b0d10; border: 1px solid #2a2f37; border-radius: 6px;
+      color: #e6e7ea; font-size: 14px; font-family: inherit;
+    }
+    #login input:focus { outline: none; border-color: #4a90e2; }
+    #login button {
+      margin-top: 12px; width: 100%; padding: 10px;
+      background: #4a90e2; border: none; border-radius: 6px;
+      color: white; font-size: 14px; font-weight: 600; cursor: pointer;
+    }
+    #login button:hover { background: #5ba1f3; }
+    #login button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #login .err { color: #ef6464; font-size: 12px; margin-top: 10px; min-height: 16px; }
+    #terminal { width: 100vw; height: 100vh; padding: 6px; box-sizing: border-box; }
+    .xterm-viewport::-webkit-scrollbar { width: 8px; }
+    .xterm-viewport::-webkit-scrollbar-thumb { background: #2a2f37; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div id="login">
+    <div class="card">
+      <h1>lmheads-codex</h1>
+      <p>Enter the password set in your container's <code>.env</code>.</p>
+      <input id="password" type="password" autocomplete="current-password" autofocus>
+      <button id="open">Open terminal</button>
+      <div class="err" id="error"></div>
+    </div>
+  </div>
+  <div id="terminal" hidden></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+  <script>
+    /*
+     * Terminal lifecycle:
+     *   1. Show login card.
+     *   2. On submit: open WS, send {type:"auth", password}.
+     *   3. Server replies {type:"ready"} (or auth error).
+     *   4. Hide login, mount xterm.js, send initial resize, then relay:
+     *        - ws binary (PTY output) → term.write()
+     *        - term.onData (keystrokes) → ws.send(binary)
+     *        - window resize → term.fit() + ws.send({type:"resize"})
+     */
+
+    const $ = (id) => document.getElementById(id)
+    const passwordEl = $('password')
+    const openBtn = $('open')
+    const errorEl = $('error')
+
+    function show(el) { el.hidden = false; el.style.display = '' }
+    function hide(el) { el.hidden = true }
+
+    function fail(message) {
+      errorEl.textContent = message
+      openBtn.disabled = false
+    }
+
+    function connect() {
+      const password = passwordEl.value
+      if (!password) { fail('Password required'); return }
+      openBtn.disabled = true
+      errorEl.textContent = ''
+
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const ws = new WebSocket(`${proto}//${location.host}/ws`)
+      ws.binaryType = 'arraybuffer'
+
+      let term = null
+      let fit = null
+      let ready = false
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'auth', password }))
+      }
+
+      ws.onerror = () => fail('Connection error')
+
+      ws.onclose = (ev) => {
+        if (term) {
+          term.write('\r\n\x1b[33m[disconnected — reload the page to reconnect]\x1b[0m\r\n')
+        } else {
+          fail(ev.reason || 'Connection closed')
+        }
+      }
+
+      ws.onmessage = (ev) => {
+        if (typeof ev.data === 'string') {
+          let msg
+          try { msg = JSON.parse(ev.data) } catch { return }
+          if (msg.type === 'ready' && !ready) {
+            ready = true
+            mount()
+          } else if (msg.type === 'error') {
+            fail(msg.message || 'auth failed')
+            ws.close()
+          }
+          return
+        }
+        if (term) {
+          term.write(new Uint8Array(ev.data))
+        }
+      }
+
+      function mount() {
+        hide($('login'))
+        const wrap = $('terminal')
+        show(wrap)
+
+        term = new Terminal({
+          cursorBlink: true,
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+          fontSize: 13,
+          theme: { background: '#0b0d10' },
+          scrollback: 5000,
+          allowProposedApi: true,
+        })
+        fit = new FitAddon.FitAddon()
+        term.loadAddon(fit)
+        term.open(wrap)
+        fit.fit()
+
+        sendResize()
+        window.addEventListener('resize', () => {
+          fit.fit()
+          sendResize()
+        })
+
+        const enc = new TextEncoder()
+        term.onData((data) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(enc.encode(data))
+          }
+        })
+
+        term.focus()
+      }
+
+      function sendResize() {
+        if (!term || ws.readyState !== WebSocket.OPEN) return
+        ws.send(JSON.stringify({
+          type: 'resize',
+          cols: term.cols,
+          rows: term.rows,
+        }))
+      }
+    }
+
+    openBtn.addEventListener('click', connect)
+    passwordEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') connect() })
+  </script>
+</body>
+</html>

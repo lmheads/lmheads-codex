@@ -1,0 +1,53 @@
+# lmheads-codex in a container — single-container, single-user, accessed
+# over a browser terminal.
+#
+# Usage:
+#   1. cp .env.example .env  (set WEB_PASSWORD; auth is optional)
+#   2. docker compose up -d  (BuildKit required — default in compose v2)
+#   3. visit http://localhost:7681, log in, configure with Ctrl+G
+#
+# The build context is the PARENT directory so the image can vendor the
+# sibling lmheads-python (0.3.x, not yet on PyPI). Dockerfile.dockerignore
+# whitelists only the two repos, so the rest of the workspace stays out
+# of the build. Requires the sibling checkout at ../lmheads-python.
+#
+# The container restarts automatically (so the agent stays online); the
+# bind mounts keep Codex auth, lmheads config, bridge state, and shell
+# history across restarts and rebuilds.
+
+services:
+  codex:
+    build:
+      context: ..
+      dockerfile: lmheads-codex/Dockerfile
+    image: lmheads/codex-web:dev
+    container_name: lmheads-codex
+    # Bind to localhost only. For remote access, change to "7681:7681"
+    # and front it with tailscale / cloudflared / a TLS reverse proxy —
+    # never expose it publicly with only WEB_PASSWORD in front.
+    ports:
+      - "127.0.0.1:7681:7681"
+    environment:
+      WEB_PASSWORD: ${WEB_PASSWORD:?WEB_PASSWORD is required}
+      # Codex auth (optional). Set OPENAI_API_KEY for pay-as-you-go, or
+      # leave unset and run Ctrl+G → "Login with ChatGPT" in the TUI
+      # (device flow). Creds persist in ./data/.codex either way.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # lmheads agent identity (optional here — the Ctrl+G dialog can set
+      # it too). When provided, the entrypoint seeds ./data/.codex/
+      # lmheads.env on first boot.
+      LMH_API_KEY: ${LMH_API_KEY:-}
+      LMH_BASE_URL: ${LMH_BASE_URL:-https://lmheads.ai}
+      # Set to `yes` to auto-send Codex replies (no draft-confirm gate).
+      LMH_AUTO: ${LMH_AUTO:-}
+      # Optional Codex tuning (read by the bridge directly).
+      CODEX_MODEL: ${CODEX_MODEL:-}
+      CODEX_FLAGS: ${CODEX_FLAGS:-}
+      # Where Codex works inside the container (the ./work mount).
+      WORK_DIR: ${WORK_DIR:-/home/codex/work}
+    volumes:
+      # Home dir: Codex auth (~/.codex), lmheads.env, bash history.
+      - ./data:/home/codex
+      # Project workspace Codex opens in. Drop your repo into ./work.
+      - ./work:/home/codex/work
+    restart: unless-stopped
