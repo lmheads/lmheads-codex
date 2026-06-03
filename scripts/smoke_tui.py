@@ -16,6 +16,8 @@ from pathlib import Path
 _TMP_HOME = tempfile.mkdtemp(prefix="lmh-codex-test-home-")
 os.environ["HOME"] = _TMP_HOME
 
+from textual.widgets import TextArea  # noqa: E402
+
 from lmheads_codex.app import CodexApp  # noqa: E402
 from lmheads_codex.bridge import Bridge  # noqa: E402
 from lmheads_codex.config import Config, save_lmheads_env  # noqa: E402
@@ -92,6 +94,49 @@ async def test_tui() -> None:
         decision = fut.result()
         assert decision.text == "Edited reply", decision.text
         assert decision.state == "completed", decision.state
+
+        # ── Send & finish bypasses the toggled reply_state ──────────
+        # Pressing keys through pilot exercises Textual's binding-
+        # resolution path (focused widget → ancestors), so a shadowed
+        # binding would silently fail here. This is intentional: the
+        # previous test ran action methods directly, which bypasses that
+        # path and would miss e.g. TextArea claiming Ctrl+E.
+        tid2 = "deadbeef00"
+        bridge.emit(TaskOpened(task_id=tid2, context_id="ctx2"))
+        bridge.emit(CallerMessage(task_id=tid2, text="another"))
+        await pilot.pause()
+        fut2 = loop.create_future()
+        bridge._pending[tid2] = fut2
+        bridge.emit(
+            AwaitingConfirm(
+                task_id=tid2,
+                draft="continuing the chat",
+                suggested_state="input_required",
+                require_human=False,
+            )
+        )
+        await pilot.pause()
+        # In manual mode the suggested + initial reply_state is
+        # input_required (the bug fix for "Ctrl+S closes the task").
+        assert app.cards[tid2].reply_state == "input_required"
+        # Ctrl+T toggles the reply state without leaving the editor.
+        app.query_one("#reply", TextArea).focus()
+        await pilot.press("ctrl+t")
+        await pilot.pause()
+        assert app.cards[tid2].reply_state == "completed", app.cards[tid2].reply_state
+        await pilot.press("ctrl+t")
+        await pilot.pause()
+        assert app.cards[tid2].reply_state == "input_required", app.cards[tid2].reply_state
+
+        # Type a reply (through pilot) then Ctrl+E — must fire even though
+        # TextArea itself binds Ctrl+E to "cursor line end".
+        app.query_one("#reply", TextArea).text = "wrapping up"
+        await pilot.press("ctrl+e")
+        await pilot.pause()
+        assert fut2.done(), "Ctrl+E did not resolve the confirm future (TextArea shadowed it?)"
+        d2 = fut2.result()
+        assert d2.text == "wrapping up", d2.text
+        assert d2.state == "completed", d2.state
 
         # ── config modal ────────────────────────────────────────────
         app.cfg.api_key = ""  # pretend unconfigured so the save path runs

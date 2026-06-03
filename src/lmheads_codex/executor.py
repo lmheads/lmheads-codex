@@ -78,7 +78,15 @@ class CodexExecutor(AgentExecutor):
             self.bridge.emit(TaskOpened(task_id=task_id, context_id=context_id))
         self.bridge.emit(CallerMessage(task_id=task_id, text=incoming))
 
-        await self._emit_state(queue, ctx, TaskState.TASK_STATE_WORKING, None)
+        # We deliberately do NOT emit a `working` state here. Posting a
+        # state-only TaskStatusUpdateEvent (no parts) shows up to the
+        # caller as an empty message — Claude CLI renders it as
+        # "Streaming placeholders. Waiting for the actual content." and
+        # then prints the real reply *again* when it arrives. The caller
+        # can infer that the agent has the task from the broker's normal
+        # task lifecycle; an empty acknowledgment costs more than it
+        # saves. The CodexStarted bridge event still tells the LOCAL TUI
+        # that work has begun.
         self.bridge.emit(CodexStarted(task_id=task_id, resumed=resumed))
 
         result = await run_codex(
@@ -97,7 +105,14 @@ class CodexExecutor(AgentExecutor):
         if result.ok and result.final_text:
             draft = result.final_text
             require_human = False
-            suggested = COMPLETED
+            # In draft-confirm mode default to input_required so the
+            # operator's Ctrl+S sends the reply *and keeps the task open*
+            # for the caller's next message — closing the task is an
+            # explicit decision (Ctrl+E "Send & finish"), not a side
+            # effect of replying. In --auto mode, completed stays the
+            # default because that's the one-shot bot pattern (each turn
+            # is a self-contained answer).
+            suggested = COMPLETED if self.cfg.auto else INPUT_REQUIRED
         else:
             err = result.error or result.stderr or "Codex produced no output."
             self.bridge.emit(TaskFailed(task_id=task_id, error=err))

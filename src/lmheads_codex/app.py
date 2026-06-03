@@ -23,6 +23,7 @@ from lmheads.discover import NotAgentScopedError
 from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult, SystemCommand
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, RichLog, Static, TextArea
@@ -74,12 +75,21 @@ class CodexApp(App):
     #reply { height: 8; border: round $panel; }
     """
 
+    # `priority=True` makes these fire even when the reply TextArea has
+    # focus (which is most of the time during a reply). Without it, keys
+    # like Ctrl+E (TextArea binds it to "cursor line end") would be
+    # silently shadowed. Ctrl+T is an alternate to F2 because macOS
+    # browsers/terminals intercept F-keys at the OS level by default
+    # (need Fn+F2 or the system "use F-keys as standard function keys"
+    # preference) — Ctrl+T always works.
     BINDINGS = [
-        ("ctrl+s", "send", "Send reply"),
-        ("f2", "toggle_state", "Toggle reply state"),
-        ("f3", "focus_tasks", "Task list"),
-        ("ctrl+g", "configure", "Configure"),
-        ("ctrl+q", "quit", "Quit"),
+        Binding("ctrl+s", "send", "Send reply", priority=True),
+        Binding("ctrl+e", "send_finish", "Send & finish", priority=True),
+        Binding("ctrl+t", "toggle_state", "Toggle reply state", priority=True),
+        Binding("f2", "toggle_state", "Toggle reply state", show=False),
+        Binding("f3", "focus_tasks", "Task list", show=False),
+        Binding("ctrl+g", "configure", "Configure", priority=True),
+        Binding("ctrl+q", "quit", "Quit", priority=True),
     ]
 
     def __init__(
@@ -332,7 +342,7 @@ class CodexApp(App):
             msg = (
                 f"[reverse] AWAITING REPLY [/] task {card.short} · "
                 f"state=[b]{card.reply_state}[/] · "
-                f"Ctrl+S send · F2 toggle state"
+                f"Ctrl+S send · Ctrl+E finish · Ctrl+T toggle state"
             )
         elif card and card.status == "working":
             tail = card.codex_tail.replace("\n", " ")[-120:]
@@ -390,17 +400,38 @@ class CodexApp(App):
         self._open_config()
 
     def action_send(self) -> None:
+        """Send the drafted reply with the task's current reply_state.
+
+        Defaults to keeping the task open (``input_required``) in manual
+        mode so a Ctrl+S doesn't accidentally close a chat — the operator
+        chooses to finish via Ctrl+E or by flipping with F2 first.
+        """
+        card = self.cards.get(self.active_id) if self.active_id else None
+        if card is None:
+            self._notice("no task selected", "warn")
+            return
+        self._send_with_state(card.reply_state)
+
+    def action_send_finish(self) -> None:
+        """Send the drafted reply AND mark the task completed.
+
+        The explicit "I'm done with this task" path. Bypasses
+        ``card.reply_state`` so the operator can finish in one keystroke
+        regardless of what state the toggle was on.
+        """
+        self._send_with_state(COMPLETED)
+
+    def _send_with_state(self, state: str) -> None:
         tid = self.active_id
         if not tid or not self.bridge.is_awaiting(tid):
             self._notice("no reply is expected for the selected task", "warn")
             return
-        card = self.cards[tid]
         reply = self.query_one("#reply", TextArea)
         text = reply.text.strip()
         if not text:
             self._notice("reply is empty — type a message before sending", "warn")
             return
-        self.bridge.resolve(tid, Decision(text=text, state=card.reply_state))
+        self.bridge.resolve(tid, Decision(text=text, state=state))
         self._set_status_field(tid, "sending…")
         self._reset_editor()
 

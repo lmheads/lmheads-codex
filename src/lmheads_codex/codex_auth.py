@@ -74,15 +74,21 @@ async def login_with_api_key(cfg: Config, api_key: str) -> tuple[bool, str]:
 
 
 def login_oauth(cfg: Config) -> tuple[bool, str]:
-    """Run ``codex login`` synchronously with inherited stdio.
+    """Run ``codex login --device-auth`` synchronously with inherited stdio.
 
-    Call this inside ``App.suspend()`` so Codex can print its device-flow
-    URL, open a browser, and block until the callback lands — all on the
-    real terminal. Blocking the event loop here is fine: the TUI is
-    suspended and there's nothing to render until login returns.
+    Call this inside ``App.suspend()`` so Codex can print the device-code
+    URL and block while polling — all on the real terminal. Blocking the
+    event loop here is fine: the TUI is suspended and there's nothing to
+    render until login returns.
+
+    Device flow (not the default loopback flow) on purpose: it works the
+    same on a desktop AND inside a container, with no need to publish the
+    1455 OAuth callback port. The operator opens the printed URL on any
+    browser they have handy, types the displayed code, and Codex polls
+    until the grant lands.
     """
     try:
-        result = subprocess.run([cfg.codex_bin, "login"])  # noqa: S603
+        result = subprocess.run([cfg.codex_bin, "login", "--device-auth"])  # noqa: S603
     except FileNotFoundError:
         return False, f"codex binary not found ('{cfg.codex_bin}')"
     ok = result.returncode == 0

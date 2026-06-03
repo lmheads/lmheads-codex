@@ -74,8 +74,12 @@ The dialog:
   validated immediately; the listener (re)connects without a restart.
 - **Codex auth** — shows the current Codex login status and offers two
   ways to authenticate the Codex CLI:
-  - **Login with ChatGPT** — suspends the TUI and runs `codex login`
-    (browser / device flow) so it owns the terminal, then resumes.
+  - **Login with ChatGPT** — suspends the TUI and runs
+    `codex login --device-auth`. Codex prints a short code and a URL;
+    open the URL on any browser, type the code, and Codex polls until
+    the grant lands. Works identically on a desktop and inside a
+    container — no port mapping required, since no loopback callback
+    is involved.
   - **Use API key** — pipes an `sk-…` key to `codex login --with-api-key`.
 
   Codex stores its own credentials under `~/.codex`; the bridge just
@@ -84,22 +88,31 @@ The dialog:
 ### Reply modes
 
 - **draft-and-confirm (default).** Every Codex reply is shown in the
-  editor pane. Edit it if you want, press **Ctrl+S** to send. **F2**
-  flips the outbound state between `completed` and `input_required`
-  (use the latter when you're asking the caller for more).
-- **auto (`--auto`).** Replies are sent automatically. If Codex fails or
-  returns nothing, the bridge still stops and asks you to compose a
-  reply — "couldn't answer on its own, so ask the human."
+  editor pane. Edit if you want, then **Ctrl+S** to send. The default
+  outbound state is `input_required`, so a normal reply keeps the task
+  open and the caller can follow up — closing the task is an explicit
+  step. **Ctrl+E** sends *and* marks the task `completed`; **F2** flips
+  the reply state if you want to send-and-finish via Ctrl+S instead.
+- **auto (`--auto`).** Replies are sent automatically and default to
+  `completed` (one-shot bot pattern). If Codex fails or returns nothing,
+  the bridge still stops and asks you to compose a reply — "couldn't
+  answer on its own, so ask the human."
 
 ### Key bindings
 
 | Key | Action |
 |---|---|
-| `Ctrl+S` | Send the reply for the selected task |
-| `F2` | Toggle reply state (`completed` ⇄ `input_required`) |
+| `Ctrl+S` | Send the reply (uses the current reply state — default `input_required` in manual mode) |
+| `Ctrl+E` | Send the reply **and finish the task** (`completed`) |
+| `Ctrl+T` (or `F2`) | Toggle reply state (`input_required` ⇄ `completed`) |
 | `F3` | Focus the task list (arrow keys to switch tasks) |
 | `Ctrl+G` | Open the config dialog (key + Codex auth) |
 | `Ctrl+Q` | Quit |
+
+> **macOS note.** On macOS, the OS intercepts F-keys for system functions
+> (brightness, volume) unless you hold **Fn** or enable *System Settings →
+> Keyboard → Use F1, F2, etc. keys as standard function keys*. Use `Ctrl+T`
+> as a drop-in replacement for `F2` if F-keys aren't reaching the terminal.
 
 ## Configuration
 
@@ -143,8 +156,9 @@ docker compose up -d        # BuildKit required (default in compose v2)
   enters the build. (Once `lmheads>=0.3` ships to PyPI this collapses to
   a self-contained `pip install lmheads-codex`.)
 - **Auth, headless.** Set `OPENAI_API_KEY` for Codex (or run Ctrl+G →
-  "Login with ChatGPT" — the device flow prints a URL you open in your
-  own browser, no browser needed in the container). Set `LMH_API_KEY` to
+  "Login with ChatGPT" — that runs `codex login --device-auth` which
+  prints a code + URL; enter the code on any browser. No callback port
+  needs to be opened from the container). Set `LMH_API_KEY` to
   pre-seed the lmheads identity, or paste it in the Ctrl+G dialog.
 - **State persists** via bind mounts: `./data` → `/home/codex` (Codex
   auth in `~/.codex`, `lmheads.env`, shell history) and `./work` →

@@ -22,9 +22,13 @@ services:
       dockerfile: lmheads-codex/Dockerfile
     image: lmheads/codex-web:dev
     container_name: lmheads-codex
-    # Bind to localhost only. For remote access, change to "7681:7681"
-    # and front it with tailscale / cloudflared / a TLS reverse proxy —
-    # never expose it publicly with only WEB_PASSWORD in front.
+    # Bind to localhost only. For remote access, change "7681:7681" and
+    # front it with tailscale / cloudflared / a TLS reverse proxy — never
+    # expose it publicly with only WEB_PASSWORD in front.
+    #
+    # No OAuth callback port is published because "Login with ChatGPT"
+    # uses `codex login --device-auth` (a code+URL you enter on any
+    # browser) instead of the loopback flow that would need port 1455.
     ports:
       - "127.0.0.1:7681:7681"
     environment:
